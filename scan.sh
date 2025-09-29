@@ -46,18 +46,49 @@ trap cleanup EXIT
 command -v scanimage >/dev/null 2>&1 || { echo >&2 "scanimage is not installed. Aborting."; exit 1; }
 command -v convert >/dev/null 2>&1 || { echo >&2 "ImageMagick (convert) is not installed. Aborting."; exit 1; }
 
-echo "Scanning the front sides ---"
-read -p "Please place all pages in the ADF, face up. Press [Enter] to start scanning..."
+scan_with_retry() {
+  local dir="$1"
+  local batch_pattern="$2"
+  local attempt=1
+  local max_attempts=5
+  local sleep_time=3
+  local success=0
+  while [ $attempt -le $max_attempts ]; do
+    echo "Scan attempt $attempt in $dir..."
+    output=$(cd "$dir" && $SCAN_COMMAND -d $DEVICE_STRING --batch=$batch_pattern 2>&1)
+    # If any pages were scanned, abort further retries
+    local scanned_count=$(ls -1 "$dir" | wc -l)
+    if [ "$scanned_count" -gt 0 ]; then
+      echo "$output"
+      success=1
+      break
+    fi
+    if echo "$output" | grep -q "scanimage: sane_start: Document feeder out of documents"; then
+      echo "No documents detected. Waiting $sleep_time seconds before retrying..."
+      sleep $sleep_time
+      attempt=$((attempt+1))
+    else
+      echo "$output"
+      success=1
+      break
+    fi
+  done
+  if [ $success -eq 0 ]; then
+    echo "Failed to scan after $max_attempts attempts."
+  fi
+}
 
-# Scan the front pages
-(cd "$FRONT_DIR" && $SCAN_COMMAND -d $DEVICE_STRING --batch=front_p%04d.tiff)
-echo "Front pages scanned. Total pages: $(ls -1 "$FRONT_DIR" | wc -l)"
+echo "Scanning the front sides ---"
+scan_with_retry "$FRONT_DIR" "front_p%04d.tiff"
+front_count=$(ls -1 "$FRONT_DIR" | wc -l)
+echo "Front pages scanned. Total pages: $front_count"
+if [ "$front_count" -eq 0 ]; then
+  echo "No documents scanned from the front side. Aborting."
+  exit 1
+fi
 
 echo "Scanning the back sides ---"
-read -p "Please put the pages back in the ADF, face down. Press [Enter] to start scanning..."
-
-# Scan the back pages (they will be in reverse order)
-(cd "$BACK_DIR" && $SCAN_COMMAND -d $DEVICE_STRING --batch=back_p%04d.tiff)
+scan_with_retry "$BACK_DIR" "back_p%04d.tiff"
 echo "Back pages scanned. Total pages: $(ls -1 "$BACK_DIR" | wc -l)"
 
 # Determine number of front and back pages
