@@ -2,7 +2,7 @@
 
 
 # Default values
-RESOLUTION=150
+RESOLUTION=300
 SCAN_COMMAND="scanimage --format tiff --source ADF --mode COLOR --resolution $RESOLUTION"
 DEVICE_STRING="escl:http://192.168.1.106:80"
 OUTPUT_DIR="/output"
@@ -66,7 +66,9 @@ num_back=$(ls -1 "$BACK_DIR" | wc -l)
 echo "Number of front pages: $num_front"
 echo "Number of back pages: $num_back"
 
-LEVEL="15%x80%"
+DESKEW="40%"
+FUZZ="15%"
+LEVEL="25%x87%"
 sorted_files=()
 
 if [ "$num_back" -eq 0 ]; then
@@ -75,7 +77,7 @@ if [ "$num_back" -eq 0 ]; then
     front_file=$(printf "$FRONT_DIR/front_p%04d.tiff" $i)
     if [ -f "$front_file" ]; then
       cleaned_front_file="$CLEANED_DIR/cleaned_p$(printf "%04d" $i).tiff"
-      convert "$front_file" -deskew 40% -fuzz 15% -trim +repage -level "$LEVEL" "$cleaned_front_file"
+      convert "$front_file" -deskew "$DESKEW" -fuzz "$FUZZ" -trim +repage -level "$LEVEL" "$cleaned_front_file"
       sorted_files+=("$cleaned_front_file")
     else
       echo "Warning: Missing front file for page $i. Skipping..."
@@ -88,9 +90,9 @@ elif [ "$num_back" -eq "$num_front" ]; then
     back_file=$(printf "$BACK_DIR/back_p%04d.tiff" $((num_front-i+1)))
     if [ -f "$front_file" ] && [ -f "$back_file" ]; then
       cleaned_front_file="$CLEANED_DIR/cleaned_p$(printf "%04d" $((2*i-1))).tiff"
-      convert "$front_file" -deskew 40% -fuzz 15% -trim +repage -level "$LEVEL" "$cleaned_front_file"
+      convert "$front_file" -deskew "$DESKEW" -fuzz "$FUZZ" -trim +repage -level "$LEVEL" "$cleaned_front_file"
       cleaned_back_file="$CLEANED_DIR/cleaned_p$(printf "%04d" $((2*i))).tiff"
-      convert "$back_file" -deskew 40% -fuzz 15% -trim +repage -level "$LEVEL" "$cleaned_back_file"
+      convert "$back_file" -deskew "$DESKEW" -fuzz "$FUZZ" -trim +repage -level "$LEVEL" "$cleaned_back_file"
       sorted_files+=("$cleaned_front_file")
       sorted_files+=("$cleaned_back_file")
     else
