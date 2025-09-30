@@ -2,7 +2,7 @@
 
 
 # Default values
-RESOLUTION=300
+RESOLUTION=150
 SCAN_COMMAND="scanimage --format tiff --source ADF --mode COLOR --resolution $RESOLUTION"
 DEVICE_STRING="escl:http://192.168.1.106:80"
 OUTPUT_DIR="/output"
