@@ -53,12 +53,36 @@ read -p "Please place all pages in the ADF, face up. Press [Enter] to start scan
 (cd "$FRONT_DIR" && $SCAN_COMMAND -d $DEVICE_STRING --batch=front_p%04d.tiff)
 echo "Front pages scanned. Total pages: $(ls -1 "$FRONT_DIR" | wc -l)"
 
+
+# Start converting front pages in the background
+DESKEW="40%"
+FUZZ="15%"
+LEVEL="25%x87%"
+convert_front() {
+  echo "Starting front pages conversion..."
+  for (( i=1; i<=$(ls -1 "$FRONT_DIR" | wc -l); i++ )); do
+    front_file=$(printf "$FRONT_DIR/front_p%04d.tiff" $i)
+    if [ -f "$front_file" ]; then
+      cleaned_front_file="$CLEANED_DIR/cleaned_p$(printf "%04d" $i).tiff"
+      convert "$front_file" -deskew "$DESKEW" -fuzz "$FUZZ" -trim +repage -level "$LEVEL" "$cleaned_front_file"
+    else
+      echo "Warning: Missing front file for page $i. Skipping..."
+    fi
+  done
+  echo "Front pages conversion completed."
+}
+convert_front &
+front_convert_pid=$!
+
 echo "Scanning the back sides ---"
 read -p "Please put the pages back in the ADF, face down. Press [Enter] to start scanning..."
 
 # Scan the back pages (they will be in reverse order)
 (cd "$BACK_DIR" && $SCAN_COMMAND -d $DEVICE_STRING --batch=back_p%04d.tiff)
 echo "Back pages scanned. Total pages: $(ls -1 "$BACK_DIR" | wc -l)"
+
+# Wait for front conversion to finish
+wait $front_convert_pid
 
 # Determine number of front and back pages
 num_front=$(ls -1 "$FRONT_DIR" | wc -l)
@@ -72,26 +96,22 @@ LEVEL="25%x87%"
 sorted_files=()
 
 if [ "$num_back" -eq 0 ]; then
-  # Only front pages exist, process them
+  # Only front pages exist, use already cleaned files
   for (( i=1; i<=num_front; i++ )); do
-    front_file=$(printf "$FRONT_DIR/front_p%04d.tiff" $i)
-    if [ -f "$front_file" ]; then
-      cleaned_front_file="$CLEANED_DIR/cleaned_p$(printf "%04d" $i).tiff"
-      convert "$front_file" -deskew "$DESKEW" -fuzz "$FUZZ" -trim +repage -level "$LEVEL" "$cleaned_front_file"
+    cleaned_front_file="$CLEANED_DIR/cleaned_p$(printf "%04d" $i).tiff"
+    if [ -f "$cleaned_front_file" ]; then
       sorted_files+=("$cleaned_front_file")
     else
-      echo "Warning: Missing front file for page $i. Skipping..."
+      echo "Warning: Missing cleaned front file for page $i. Skipping..."
     fi
   done
 elif [ "$num_back" -eq "$num_front" ]; then
-  # Interleave front and back pages
+  # Interleave already cleaned front and newly cleaned back pages
   for (( i=1; i<=num_front; i++ )); do
-    front_file=$(printf "$FRONT_DIR/front_p%04d.tiff" $i)
+    cleaned_front_file="$CLEANED_DIR/cleaned_p$(printf "%04d" $i).tiff"
     back_file=$(printf "$BACK_DIR/back_p%04d.tiff" $((num_front-i+1)))
-    if [ -f "$front_file" ] && [ -f "$back_file" ]; then
-      cleaned_front_file="$CLEANED_DIR/cleaned_p$(printf "%04d" $((2*i-1))).tiff"
-      convert "$front_file" -deskew "$DESKEW" -fuzz "$FUZZ" -trim +repage -level "$LEVEL" "$cleaned_front_file"
-      cleaned_back_file="$CLEANED_DIR/cleaned_p$(printf "%04d" $((2*i))).tiff"
+    cleaned_back_file="$CLEANED_DIR/cleaned_p$(printf "%04d" $((num_front+i))).tiff"
+    if [ -f "$cleaned_front_file" ] && [ -f "$back_file" ]; then
       convert "$back_file" -deskew "$DESKEW" -fuzz "$FUZZ" -trim +repage -level "$LEVEL" "$cleaned_back_file"
       sorted_files+=("$cleaned_front_file")
       sorted_files+=("$cleaned_back_file")
