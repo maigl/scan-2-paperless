@@ -71,6 +71,79 @@ FUZZ="15%"
 LEVEL="25%x87%"
 sorted_files=()
 
+convert_in_background() {
+  local src="$1"
+  local dest="$2"
+  if [ -f "$src" ]; then
+    convert "$src" -deskew "$DESKEW" -fuzz "$FUZZ" -trim +repage -level "$LEVEL" "$dest" &
+  fi
+}
+
+scan_and_convert() {
+  local scan_dir="$1"
+  local batch_pattern="$2"
+  local cleaned_dir="$3"
+  local prefix="$4"
+  local scan_count_var="$5"
+
+  # Start scan in background
+  (cd "$scan_dir" && $SCAN_COMMAND -d $DEVICE_STRING --batch=$batch_pattern) &
+  local scan_pid=$!
+
+  local last_converted=0
+  local bg_pids=()
+
+  while kill -0 $scan_pid 2>/dev/null; do
+    # Find new TIFFs
+    for tiff in $(ls "$scan_dir"/${prefix}_p*.tiff 2>/dev/null); do
+      idx=$(echo "$tiff" | grep -oP '(?<=_p)\d+' | sed 's/^0*//')
+      cleaned_file="$cleaned_dir/cleaned_p$(printf "%04d" $idx).tiff"
+      if [ ! -f "$cleaned_file" ]; then
+        convert_in_background "$tiff" "$cleaned_file"
+        bg_pids+=("$!")
+      fi
+    done
+    sleep 1
+  done
+
+  # Final conversion for any remaining TIFFs
+  for tiff in $(ls "$scan_dir"/${prefix}_p*.tiff 2>/dev/null); do
+    idx=$(echo "$tiff" | grep -oP '(?<=_p)\d+' | sed 's/^0*//')
+    cleaned_file="$cleaned_dir/cleaned_p$(printf "%04d" $idx).tiff"
+    if [ ! -f "$cleaned_file" ]; then
+      convert_in_background "$tiff" "$cleaned_file"
+      bg_pids+=("$!")
+    fi
+  done
+
+  # Wait for all background conversions
+  for pid in "${bg_pids[@]}"; do
+    wait $pid
+  done
+
+  # Set scan count variable
+  eval $scan_count_var=$(ls "$scan_dir"/${prefix}_p*.tiff 2>/dev/null | wc -l)
+}
+
+# Scanning and converting front pages
+scan_and_convert "$FRONT_DIR" "front_p%04d.tiff" "$CLEANED_DIR" "front" front_count
+if [ "$front_count" -eq 0 ]; then
+  echo "No documents scanned from the front side. Aborting."
+  exit 1
+fi
+
+echo "Front pages scanned. Total pages: $front_count"
+
+# Scanning and converting back pages
+scan_and_convert "$BACK_DIR" "back_p%04d.tiff" "$CLEANED_DIR" "back" back_count
+echo "Back pages scanned. Total pages: $back_count"
+
+# Determine number of front and back pages
+num_front=$(ls -1 "$FRONT_DIR" | wc -l)
+num_back=$(ls -1 "$BACK_DIR" | wc -l)
+echo "Number of front pages: $num_front"
+echo "Number of back pages: $num_back"
+
 if [ "$num_back" -eq 0 ]; then
   # Only front pages exist, process them
   for (( i=1; i<=num_front; i++ )); do
